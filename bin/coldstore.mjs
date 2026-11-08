@@ -18,7 +18,7 @@
  *   --force        restore despite a sha256 mismatch
  *   --help         print this usage
  */
-import { readdir, readFile, rename, copyFile, mkdir } from 'node:fs/promises'
+import { readdir, readFile, rename, copyFile, mkdir, rm } from 'node:fs/promises'
 import { createHash } from 'node:crypto'
 import { createReadStream } from 'node:fs'
 import { existsSync } from 'node:fs'
@@ -183,13 +183,28 @@ if (command === 'restore') {
       }
       await mkdir(path.dirname(to), { recursive: true })
       await rename(from, to)
+      // From here on the session has already moved, so every failure has to put
+      // it back: the manifest is the only record of where a cold session lives.
       const docFrom = path.join(coldRoot, 'projcache', `${id}.json`)
-      if (existsSync(docFrom)) {
-        await mkdir(projcacheRoot, { recursive: true })
-        await rename(docFrom, path.join(projcacheRoot, `${id}.json`))
+      const docTo = path.join(projcacheRoot, `${id}.json`)
+      let docMoved = false
+      try {
+        if (existsSync(docFrom)) {
+          await mkdir(projcacheRoot, { recursive: true })
+          // The cold document is authoritative at restore time; DSH may have
+          // written a fresh one when it re-listed the session.
+          await rm(docTo, { force: true })
+          await rename(docFrom, docTo)
+          docMoved = true
+        }
+        delete manifest.entries[id]
+        await writeFileAtomic(manifestPath, manifest)
+      } catch (error) {
+        manifest.entries[id] = entry
+        if (docMoved) await rename(docTo, docFrom).catch(() => {})
+        await rename(to, from).catch(() => {})
+        throw error
       }
-      delete manifest.entries[id]
-      await writeFileAtomic(manifestPath, manifest)
       console.log(`restored ${id}`)
       ok += 1
     } catch (error) {

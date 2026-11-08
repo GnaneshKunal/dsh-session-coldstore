@@ -10,10 +10,12 @@
  */
 import assert from 'node:assert/strict'
 import { mkdir, mkdtemp, readFile, writeFile } from 'node:fs/promises'
+import { existsSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { freezeRefusal } from '../lib/index.js'
 import { movePath } from '../lib/manifest.js'
+import { Coldstore } from '../lib/sweep.js'
 
 let passed = 0
 const failures = []
@@ -109,6 +111,67 @@ await test('movePath refuses to replace a file with a directory', async () => {
   assert.equal(await readFile(to, 'utf8'), 'a file lives here')
 })
 
+// ── 2b. freeze and restore cannot strand a session ──────────────────────
+
+async function coldstoreFixture() {
+  const root = await mkdtemp(path.join(tmpdir(), 'coldstore-seq-'))
+  const liveRoot = path.join(root, 'sessions')
+  const projcacheRoot = path.join(root, 'projcache')
+  const coldRoot = path.join(root, 'cold')
+  const sid = 'session-seq-1'
+  const bare = 'seq-1'
+  const dir = path.join(liveRoot, '--proj--', bare)
+  await mkdir(dir, { recursive: true })
+  await writeFile(path.join(dir, 'session.v4.jsonl.zstd'), 'transcript')
+  await mkdir(projcacheRoot, { recursive: true })
+  await writeFile(path.join(projcacheRoot, `${sid}.json`), JSON.stringify({ record: { rows: { x: { val: 'live-doc' } } } }))
+  const engine = await new Coldstore({ coldRoot, liveRoot, projcacheRoot }).load()
+  const live = (await engine.liveSessions())[0]
+  return { liveRoot, projcacheRoot, coldRoot, sid, dir, engine, live }
+}
+
+await test('freeze refuses a populated cold directory before moving anything', async () => {
+  const f = await coldstoreFixture()
+  const coldDir = path.join(f.coldRoot, 'sessions', f.sid)
+  await mkdir(coldDir, { recursive: true })
+  await writeFile(path.join(coldDir, 'session.v4.jsonl.zstd'), 'older')
+  await assert.rejects(() => f.live && f.engine.freezeOne(f.live, f.engine.metadata(f.sid)), /destination is not empty/)
+  assert.equal(await readFile(path.join(f.dir, 'session.v4.jsonl.zstd'), 'utf8'), 'transcript')
+  assert.deepEqual(Object.keys(f.engine.manifest.entries), [])
+})
+
+await test('freeze replaces a stale cold cache document instead of stranding', async () => {
+  const f = await coldstoreFixture()
+  await mkdir(path.join(f.coldRoot, 'projcache'), { recursive: true })
+  await writeFile(path.join(f.coldRoot, 'projcache', `${f.sid}.json`), 'stale')
+  const entry = await f.engine.freezeOne(f.live, await f.engine.metadata(f.sid))
+  assert.equal(entry.projcacheDoc, true)
+  assert.ok(!existsSync(f.dir), 'the live directory should have moved')
+  const coldDoc = await readFile(path.join(f.coldRoot, 'projcache', `${f.sid}.json`), 'utf8')
+  assert.ok(coldDoc.includes('live-doc'), 'the live document is authoritative at freeze time')
+  assert.deepEqual(Object.keys(f.engine.manifest.entries), [f.sid])
+})
+
+await test('restore refuses a populated live directory and keeps the cold copy', async () => {
+  const f = await coldstoreFixture()
+  await f.engine.freezeOne(f.live, await f.engine.metadata(f.sid))
+  await mkdir(f.dir, { recursive: true })
+  await writeFile(path.join(f.dir, 'newer'), 'x')
+  await assert.rejects(() => f.engine.restoreOne(f.sid), /destination is not empty/)
+  assert.ok(existsSync(path.join(f.coldRoot, 'sessions', f.sid)), 'the cold copy must survive')
+  assert.deepEqual(Object.keys(f.engine.manifest.entries), [f.sid])
+})
+
+await test('restore replaces a re-created live cache document', async () => {
+  const f = await coldstoreFixture()
+  await f.engine.freezeOne(f.live, await f.engine.metadata(f.sid))
+  await writeFile(path.join(f.projcacheRoot, `${f.sid}.json`), 'recreated')
+  await f.engine.restoreOne(f.sid)
+  assert.ok(existsSync(f.dir))
+  assert.deepEqual(Object.keys(f.engine.manifest.entries), [])
+  assert.ok(!existsSync(path.join(f.coldRoot, 'sessions', f.sid)), 'the cold copy should have moved back')
+})
+
 // ── 3. translation keys ─────────────────────────────────────────────────
 
 async function translationState() {
@@ -124,7 +187,8 @@ async function translationState() {
     ...[...dict.matchAll(/^\s{6}(?:'([^']+)'|([A-Za-z][\w.-]*))\s*:/gm)].map((m) => m[1] || m[2]),
     ...Object.keys(locale),
   ])
-  const used = new Set([...source.matchAll(/[^A-Za-z0-9_$.]t\('([^']+)'\)/g)].map((m) => m[1]))
+  // Both shapes count: t('key') and the parameterized t('key', vars).
+  const used = new Set([...source.matchAll(/[^A-Za-z0-9_$.]t\('([^']+)'(?:\)|,)/g)].map((m) => m[1]))
   return { defined, used }
 }
 

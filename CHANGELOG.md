@@ -1,8 +1,28 @@
 # Changelog
 
-## 0.1.1 — 2026-11-08
+## 0.1.2 — 2026-11-08
 
-Fixes from a pre-release audit. A dry-run install behaves as before; these are
+Closes the hole the 0.1.1 fix opened. Making `movePath` refuse to overwrite was
+right for a transcript directory, but freeze and restore also move the projection
+cache document: a stale document there aborted the second move *after* the session
+directory had already gone somewhere the manifest did not describe.
+
+- Freeze and restore now **preflight both destinations** (the session directory and
+  its cache document) before the first move, and roll back every move if a later
+  step fails. A cache document is replaced deliberately — the live copy is
+  authoritative at freeze, the cold one at restore — while a transcript directory
+  is never replaced. `delete` rolls back too if the manifest write fails.
+- `/freeze` is decided by `freezeRefusal` for dry run as well, so its dryRun branch
+  is no longer dead code; it normalizes ids and rejects a non-array body with 400.
+- CLI restore gives the projection-cache document the same replace-and-rollback
+  treatment as the host.
+- Docs: `dryRun` is scoped exactly (it gates what *enters* cold; restore and an
+  explicit delete stay available), `minIdleMs` is described as the floor it is,
+  and the Entry shape documents `dirName`.
+- The translation-key test now also matches the parameterized `t('key', vars)`
+  calls it used to skip.
+
+## 0.1.1 — 2026-11-08
 the places where the plugin did not keep its own promises.
 
 - **`POST /freeze` no longer bypasses the safety policy.** It moved sessions

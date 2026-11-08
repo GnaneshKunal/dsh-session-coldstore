@@ -47,19 +47,21 @@ The bundle inserts one row:
 ```
 
 Override it in the profile's `cordis.patch.yml` by id. `dryRun: true` is the
-default; nothing moves until you turn it off.
+default: while it is on, nothing is added to the cold tier — a sweep, a staged
+commit and a direct freeze all refuse. Restoring a session back and deleting one
+you selected are explicit actions and stay available; both are recoverable.
 
 ## Config
 
 | key | default | meaning |
 |---|---|---|
 | `retainDays` | `7` | stay live while prompted within this many days |
-| `dryRun` | `true` | no path may move a session — sweeps, commits and direct freezes all refuse |
+| `dryRun` | `true` | nothing is added to cold: sweeps, commits and direct freezes all refuse |
 | `coldRoot` | `~/.dsh/coldstore` | cold tier root |
 | `keepPinned` | `true` | never freeze a pinned session |
 | `keepStarred` | `true` | never freeze a starred session |
 | `keepUnread` | `true` | never freeze a session never observed as opened |
-| `minIdleMs` | `3600000` | extra idle requirement (ms) |
+| `minIdleMs` | `3600000` | minimum idle floor; a session must be idle for `max(retainDays, minIdleMs)` |
 | `sweepOnBoot` | `true` | one sweep ~5 s after activation |
 | `sweepIntervalMinutes` | `720` | repeat interval; `0` disables |
 | `indexCold` | `true` | index text as sessions freeze |
@@ -134,12 +136,12 @@ already left.
 - Nothing is deleted. `delete` moves the session to `coldstore/trash/`, and a
   move never overwrites a populated destination — it replaces an empty
   directory only.
-- A live session is never moved, and no path (sweep, commit, direct freeze) may
-  move one while `dryRun` is on. An explicit `delete` you confirm still acts
-  under `dryRun`, because it is your deliberate, recoverable action rather than
-  a sweep.
-- Freezing writes the manifest **after** the directory moves and moves it
-  straight back if that write fails — no frozen-but-unrecorded session.
+- A live session is never moved, and nothing enters the cold tier while
+  `dryRun` is on. `restore` and an explicit `delete` you confirm still act under
+  `dryRun`: they are your deliberate, recoverable actions rather than a sweep.
+- Freezing moves the directory and then writes the manifest, and rolls the
+  move back if the manifest write fails. Every refusal is decided **before** the
+  first move, so a failure cannot leave a session the manifest does not describe.
 - Restore verifies the sha256 recorded at freeze time and refuses a changed
   transcript. The CLI verifies too, and `--force` is the deliberate override.
 - **Privacy note:** `index.sqlite` stores the extracted plaintext of every cold

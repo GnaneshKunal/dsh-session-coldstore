@@ -1,6 +1,6 @@
 {
   "name": "@gnanesh/dsh-session-coldstore",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "type": "module",
   "description": "Tiered cold storage for DSH sessions: freeze idle sessions out of the live list without deleting them, keep them full-text searchable through an on-disk index, and restore in one click.",
   "keywords": [

@@ -30,6 +30,7 @@ The projection-cache filename is always the bare `<sessionId>.json`.
 type Entry = {
   id: string              // canonical session id, with session- prefix
   projectDir: string      // original ~/.dsh/sessions/<project> basename
+  dirName: string         // on-disk directory name, which may differ from dirName(id)
   frozenAt: number        // epoch ms
   lastPromptAt: number    // epoch ms, from the projection cache
   title: string
@@ -59,7 +60,7 @@ await idx.close()
 than 240 chars.
 
 Use `node:sqlite` (`DatabaseSync`) with `CREATE VIRTUAL TABLE ... USING fts5`.
-Decompression is `zlib.zstdDecompressSync` from `node:zlib` (Node 24 has it).
+Decompression is `zlib.zstdDecompressSync` from `node:zlib` (Node 22.15+).
 Do not add npm dependencies.
 
 ## Host ↔ Client HTTP routes
@@ -139,8 +140,9 @@ observable in `GET /plan` and in the `skipped` list a commit returns.
 
 ## Safety rules
 
-- Never move a session while `dryRun` is on, on any path (sweep, commit,
-  direct freeze). A move is only ever reachable with `dryRun: false`.
+- Never add a session to the cold tier while `dryRun` is on, on any path
+  (sweep, commit, direct freeze). `restore` and `delete` are explicit,
+  recoverable actions and are not gated by it.
 - Never move a live session, and never let naming a session bypass an exemption.
 - Never overwrite a populated destination: `movePath` replaces an *empty*
   directory only and otherwise throws, so a stale copy cannot silently destroy a
