@@ -1,0 +1,63 @@
+name: Release
+
+# Pushing a tag is the release: verify it, publish to npm, then create the GitHub
+# release. One-time setup on npmjs.com: publish 0.1.0 once from a local clone,
+# then add a trusted publisher (GitHub Actions, repository
+# GnaneshKunal/dsh-session-coldstore, workflow `release.yml`, environment
+# `release`). No npm token is stored in this repository.
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: write # create the GitHub Release
+  id-token: write # OIDC: npm trusted publishing and provenance
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    environment: release
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: '24'
+          registry-url: https://registry.npmjs.org
+
+      - name: Use an OIDC-capable npm CLI
+        run: npm install --global npm@latest
+
+      # A tag that disagrees with package.json would publish one version and claim another.
+      - name: Check the tag matches package.json
+        run: |
+          tag="${GITHUB_REF_NAME#v}"
+          version=$(node -p "require('./package.json').version")
+          if [ "$tag" != "$version" ]; then
+            echo "::error::tag $tag does not match package.json $version"
+            exit 1
+          fi
+
+      - run: npm run check
+      - run: npm test
+
+      # A manual bootstrap publish and this workflow can describe the same version;
+      # publishing it twice is an error, but the GitHub Release should still exist.
+      - name: Check whether npm already has this version
+        id: published
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          if npm view "${npm_package_name}@$version" version >/dev/null 2>&1; then
+            echo "exists=true" >> "$GITHUB_OUTPUT"
+            echo "npm already has $version; skipping the publish step"
+          else
+            echo "exists=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Publish to npm
+        if: steps.published.outputs.exists != 'true'
+        run: npm publish --access public --provenance
+
+      - name: Publish the GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release create "$GITHUB_REF_NAME" --title "$GITHUB_REF_NAME" --generate-notes --verify-tag

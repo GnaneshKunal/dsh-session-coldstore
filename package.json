@@ -1,0 +1,83 @@
+{
+  "name": "@gnanesh/dsh-session-coldstore",
+  "version": "0.1.0",
+  "type": "module",
+  "description": "Tiered cold storage for DSH sessions: freeze idle sessions out of the live list without deleting them, keep them full-text searchable through an on-disk index, and restore in one click.",
+  "keywords": [
+    "deepseek",
+    "harness",
+    "dsh",
+    "dsh-plugin",
+    "sessions",
+    "session-storage",
+    "cold-storage",
+    "tiering",
+    "full-text-search",
+    "fts5",
+    "sqlite",
+    "archival"
+  ],
+  "license": "MIT",
+  "author": "Gnanesh Kunal",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/GnaneshKunal/dsh-session-coldstore.git"
+  },
+  "homepage": "https://github.com/GnaneshKunal/dsh-session-coldstore#readme",
+  "bugs": {
+    "url": "https://github.com/GnaneshKunal/dsh-session-coldstore/issues"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "engines": {
+    "dsh": ">=0.2.1-rc.1",
+    "node": ">=22.19"
+  },
+  "exports": {
+    ".": "./lib/index.js",
+    "./client": "./lib/client.js",
+    "./package.json": "./package.json",
+    "./locale/*.json": "./locale/*.json",
+    "./icon": "./icon.svg"
+  },
+  "bin": {
+    "coldstore": "./bin/coldstore.mjs"
+  },
+  "files": [
+    "lib/index.js",
+    "lib/client.js",
+    "lib/index-engine.js",
+    "lib/sweep.js",
+    "lib/manifest.js",
+    "bin/coldstore.mjs",
+    "cordis.patch.yml",
+    "locale/*.json",
+    "icon.svg",
+    "API.md",
+    "README.md"
+  ],
+  "scripts": {
+    "test": "node test/sweep.test.mjs && node test/index-engine.test.mjs && node test/integration.test.mjs && node test/client-render.test.mjs && node test/notify.test.mjs",
+    "check": "node --check lib/index.js && node --check lib/client.js && node --check lib/index-engine.js && node --check lib/sweep.js && node --check lib/manifest.js && node --check bin/coldstore.mjs"
+  },
+  "dsh": {
+    "client": {
+      "platform": "web",
+      "inject": [
+        "@deepseek-ai/dsh-client-runtime",
+        "@deepseek-ai/dsh-client-ui-settings",
+        "@deepseek-ai/dsh-client-locale"
+      ]
+    },
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    },
+    "compatibility": {
+      "node": "^22.19.0 || >=24.0.0",
+      "profiles": [
+        "web"
+      ]
+    }
+  }
+}

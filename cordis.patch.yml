@@ -1,0 +1,9 @@
+# The dsh-session-coldstore bundle patch: activates the plugin row in any
+# profile that installs this package. The user's own cordis.patch.yml may
+# still override, reconfigure, or disable this row by id.
+- insert:
+    - id: session-coldstore
+      name: '@gnanesh/dsh-session-coldstore'
+      config:
+        retainDays: 7
+        dryRun: true
