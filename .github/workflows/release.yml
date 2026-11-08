@@ -46,7 +46,8 @@ jobs:
         id: published
         run: |
           version="${GITHUB_REF_NAME#v}"
-          if npm view "${npm_package_name}@$version" version >/dev/null 2>&1; then
+          package=$(node -p "require('./package.json').name")
+          if npm view "$package@$version" version >/dev/null 2>&1; then
             echo "exists=true" >> "$GITHUB_OUTPUT"
             echo "npm already has $version; skipping the publish step"
           else

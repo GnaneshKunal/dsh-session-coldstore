@@ -54,7 +54,7 @@ default; nothing moves until you turn it off.
 | key | default | meaning |
 |---|---|---|
 | `retainDays` | `7` | stay live while prompted within this many days |
-| `dryRun` | `true` | sweep reports only |
+| `dryRun` | `true` | no path may move a session — sweeps, commits and direct freezes all refuse |
 | `coldRoot` | `~/.dsh/coldstore` | cold tier root |
 | `keepPinned` | `true` | never freeze a pinned session |
 | `keepStarred` | `true` | never freeze a starred session |
@@ -65,13 +65,18 @@ default; nothing moves until you turn it off.
 | `indexCold` | `true` | index text as sessions freeze |
 | `notifyOnSweep` | `true` | post a macOS notification after an automatic sweep that moved something |
 
-The Settings page writes the same keys to `~/.dsh/coldstore/config.json`, which
-overrides the row config without touching your patch layer.
+The Settings page writes seven of these keys to `~/.dsh/coldstore/config.json`
+(`retainDays`, `dryRun`, `keepPinned`, `keepStarred`, `keepUnread`,
+`minIdleMs`, `notifyOnSweep`), which overrides the row config without touching
+your patch layer. The rest are row/JSON-only. Note that `minIdleMs` is a floor,
+not an addition: a session must be idle for `max(retainDays, minIdleMs)`.
 
 ## Exemptions
 
 In precedence order, a session is never frozen when it is:
 
+0. `already-cold` — a skip, checked first: a cold id has no live directory left
+   to move;
 1. `live` — a live agent exists for it;
 2. `pinned` — in the workspace registry's pin set;
 3. `starred` — starred in the portal;
@@ -80,6 +85,10 @@ In precedence order, a session is never frozen when it is:
 6. `todo` — it has a todo that is not `completed`;
 7. `subagent` — a subagent child;
 8. `too-new` — prompted inside `retainDays` (or `minIdleMs`).
+
+Nothing on this list is a soft preference: the same classifier decides a plan,
+a staged commit and a direct freeze, so naming a session explicitly does not
+move it past an exemption.
 
 **The `unread` limitation, stated plainly:** DSH keeps no durable "you read
 this" marker — the "unopened" dot is transient client state. Coldstore keeps its
@@ -122,12 +131,21 @@ already left.
 
 ## Safety
 
-- Nothing is deleted. `delete` moves the session to `coldstore/trash/`.
-- A live session is never moved.
+- Nothing is deleted. `delete` moves the session to `coldstore/trash/`, and a
+  move never overwrites a populated destination — it replaces an empty
+  directory only.
+- A live session is never moved, and no path (sweep, commit, direct freeze) may
+  move one while `dryRun` is on. An explicit `delete` you confirm still acts
+  under `dryRun`, because it is your deliberate, recoverable action rather than
+  a sweep.
 - Freezing writes the manifest **after** the directory moves and moves it
   straight back if that write fails — no frozen-but-unrecorded session.
 - Restore verifies the sha256 recorded at freeze time and refuses a changed
-  transcript.
+  transcript. The CLI verifies too, and `--force` is the deliberate override.
+- **Privacy note:** `index.sqlite` stores the extracted plaintext of every cold
+  transcript in `~/.dsh/coldstore` (capped per session) so search stays local.
+  It is the same content as the transcripts, just uncompressed, and it is
+  removed when you delete the coldstore directory.
 - `bin/coldstore.mjs` needs neither the plugin nor DSH: `list`, `verify`,
   `restore --all` work from the manifest alone.
 
@@ -137,6 +155,9 @@ node bin/coldstore.mjs verify
 node bin/coldstore.mjs restore --all --dry-run
 node bin/coldstore.mjs restore --all
 ```
+
+Installed as a plugin, the same CLI is on your PATH as `coldstore`; `--force`
+restores despite a sha256 mismatch, and `--help` lists every flag.
 
 ## Layout
 
@@ -156,11 +177,16 @@ node bin/coldstore.mjs restore --all
 ## Tests
 
 ```
-node test/sweep.test.mjs      # tiering policy + freeze/restore/trash round-trip
+node test/sweep.test.mjs         # tiering policy + freeze/restore/trash round-trip
 node test/index-engine.test.mjs  # FTS5 search, filters, hostile queries
+node test/integration.test.mjs   # engine + index together
+node test/client-render.test.mjs # the Settings page renders
+node test/notify.test.mjs        # the sweep notification
+node test/guards.test.mjs        # dry-run/exemption guards, move safety, i18n keys
 ```
 
-Both run entirely in temp directories and never touch a real session.
+`npm test` runs all of them, and every one works in temp directories and never
+touches a real session.
 
 ## Restoring search after a sweep
 

@@ -1,6 +1,6 @@
 {
   "name": "@gnanesh/dsh-session-coldstore",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "type": "module",
   "description": "Tiered cold storage for DSH sessions: freeze idle sessions out of the live list without deleting them, keep them full-text searchable through an on-disk index, and restore in one click.",
   "keywords": [
@@ -32,7 +32,7 @@
   },
   "engines": {
     "dsh": ">=0.2.1-rc.1",
-    "node": ">=22.19"
+    "node": "^22.19.0 || >=24.0.0"
   },
   "exports": {
     ".": "./lib/index.js",
@@ -42,7 +42,7 @@
     "./icon": "./icon.svg"
   },
   "bin": {
-    "coldstore": "./bin/coldstore.mjs"
+    "coldstore": "bin/coldstore.mjs"
   },
   "files": [
     "lib/index.js",
@@ -55,10 +55,11 @@
     "locale/*.json",
     "icon.svg",
     "API.md",
-    "README.md"
+    "README.md",
+    "CHANGELOG.md"
   ],
   "scripts": {
-    "test": "node test/sweep.test.mjs && node test/index-engine.test.mjs && node test/integration.test.mjs && node test/client-render.test.mjs && node test/notify.test.mjs",
+    "test": "node test/sweep.test.mjs && node test/index-engine.test.mjs && node test/integration.test.mjs && node test/client-render.test.mjs && node test/notify.test.mjs && node test/guards.test.mjs",
     "check": "node --check lib/index.js && node --check lib/client.js && node --check lib/index-engine.js && node --check lib/sweep.js && node --check lib/manifest.js && node --check bin/coldstore.mjs"
   },
   "dsh": {

@@ -41,5 +41,7 @@
   "keepUnread": "Never freeze sessions you have not opened",
   "keepLive": "Never freeze running or waiting sessions",
   "save": "Save",
-  "saved": "Saved."
+  "saved": "Saved.",
+  "cancel": "Cancel",
+  "close": "Close"
 }

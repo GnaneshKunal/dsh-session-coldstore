@@ -15,6 +15,8 @@
  * Options:
  *   --cold <dir>   cold tier root (default ~/.dsh/coldstore)
  *   --dry-run      report what would happen
+ *   --force        restore despite a sha256 mismatch
+ *   --help         print this usage
  */
 import { readdir, readFile, rename, copyFile, mkdir } from 'node:fs/promises'
 import { createHash } from 'node:crypto'
@@ -25,13 +27,23 @@ import os from 'node:os'
 
 const DSH_HOME = path.join(os.homedir(), '.dsh')
 const args = process.argv.slice(2)
-const command = args.find((a) => !a.startsWith('--')) || 'list'
 const coldFlag = args.indexOf('--cold')
-const coldRoot = coldFlag >= 0 ? args[coldFlag + 1] : path.join(DSH_HOME, 'coldstore')
+const coldValue = coldFlag >= 0 ? args[coldFlag + 1] : undefined
+const coldRoot = coldValue || path.join(DSH_HOME, 'coldstore')
+// A flag's value is not a positional argument, and --cold takes one. Reading
+// positionals this way keeps `--cold /x list` from treating /x as the command.
+const positional = args.filter((a) => !a.startsWith('--') && a !== coldValue)
+const command = positional[0] || 'list'
+const ids = positional.slice(1)
 const liveRoot = path.join(DSH_HOME, 'sessions')
 const projcacheRoot = path.join(DSH_HOME, 'storages', 'session_projcache', 'sessions')
 const dryRun = args.includes('--dry-run')
-const ids = args.filter((a) => !a.startsWith('--') && a !== command && a !== coldRoot)
+const force = args.includes('--force')
+
+if (args.includes('--help') || args.includes('-h')) {
+  console.log('usage: coldstore.mjs <list|verify|restore> [ids...] [--cold <dir>] [--dry-run] [--force]')
+  process.exit(0)
+}
 
 const manifestPath = path.join(coldRoot, 'manifest.json')
 
@@ -155,6 +167,20 @@ if (command === 'restore') {
       continue
     }
     try {
+      // Verify before moving: a corrupted transcript must not be handed back to
+      // DSH as if it were sound. --force is the deliberate override.
+      if (entry.sha256 && !force) {
+        const name = await transcriptOf(from)
+        const digest = name ? await sha256File(path.join(from, name)) : null
+        if (digest !== entry.sha256) {
+          throw new Error(`sha256 mismatch — refusing to restore (use --force to override)`)
+        }
+      }
+      // Never clobber a populated live directory: the cold copy is the only
+      // verified one, and the live copy may be newer.
+      if (existsSync(to) && (await readdir(to).catch(() => ['?'])).length) {
+        throw new Error(`live directory is not empty: ${to}`)
+      }
       await mkdir(path.dirname(to), { recursive: true })
       await rename(from, to)
       const docFrom = path.join(coldRoot, 'projcache', `${id}.json`)

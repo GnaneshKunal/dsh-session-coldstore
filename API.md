@@ -64,23 +64,26 @@ Do not add npm dependencies.
 
 ## Host ↔ Client HTTP routes
 
-Base: `/session-coldstore/api`. All JSON. Register with
-`ctx.webServer.register({ method, path, handler })` and return `Response`.
+Base: `/session-coldstore/api`. All JSON. Register one **prefix** route —
+`ctx.webServer.register({ kind: 'prefix', path: '/session-coldstore', handler(req, res) })` —
+and answer inside `handler` by writing the response yourself
+(`res.writeHead(status, headers)` then `res.end(body)`). There is no returned
+`Response` object; the host owns the socket.
 
 | Method | Path | Body / Query | Response |
 |---|---|---|---|
-| GET | `/status` | – | `{ retainDays, dryRun, coldRoot, keepPinned, keepStarred, keepUnread, minIdleMs, notifyOnSweep, live:{count,bytes}, cold:{count,bytes}, stars:number, index:{rows}, lastSweep }` |
+| GET | `/status` | – | `{ retainDays, dryRun, coldRoot, version, live:{count,bytes}, cold:{count,bytes}, stars:number, index:{rows}, lastSweep, batch:{id,createdAt,count,bytes}\|null, keepPinned, keepStarred, keepUnread, minIdleMs, notifyOnSweep }` |
 | GET | `/plan` | `?days=` | `{ candidates: V[], exempt: E[], totals:{count,bytes} }` |
 | POST | `/sweep` | – | **stages** a batch, moves nothing: `{ id, createdAt, retainDays, candidates: V[], exempt: E[], totals }` |
 | GET | `/batch` | – | `{ batch: Batch \| null }` |
 | POST | `/commit` | `{ batchId }` | `{ batchId, moved: V[], skipped: {id,reason}[], bytes }` — refuses under `dryRun` or on a stale `batchId` |
 | POST | `/discard` | – | `{ ok: true }` |
-| POST | `/freeze` | `{ ids: string[] }` | `{ moved: V[], failed: {id,error}[] }` — direct, bypasses staging |
+| POST | `/freeze` | `{ ids: string[] }` | `{ moved: V[], failed: {id,error}[] }` — direct (no staging checkpoint), but **not** a policy bypass: under `dryRun` it refuses with 409, and every exemption still holds, so it moves only what a sweep would |
 | POST | `/restore` | `{ ids: string[] }` | `{ restored: string[], failed: {id,error}[] }` |
 | GET | `/search` | `?q&limit&offset&from&to&starred` | `{ items: R[], total }` |
 | GET | `/session` | `?id=` | `{ entry: Entry, preview: string }` |
 | POST | `/star` | `{ id, starred: boolean }` | `{ ok: true }` — accepts **any** session id, cold or live, so a session can be protected *before* it freezes |
-| POST | `/delete` | `{ ids: string[] }` | `{ trashed: string[] }` |
+| POST | `/delete` | `{ ids: string[] }` | `{ trashed: string[], failed: {id,error}[] }` — an explicit delete acts even under `dryRun`; it moves to `trash/` and never unlinks |
 | POST | `/config` | any of `{ retainDays, dryRun, keepPinned, keepStarred, keepUnread, minIdleMs, notifyOnSweep }` | `{ ok: true }` — **merges** into `coldRoot/config.json`; a partial patch never drops an earlier choice |
 | POST | `/reindex` | – | `{ rows }` |
 
@@ -112,24 +115,38 @@ different plan staged in another.
 
 ## Exemption rules (host-side, in this order)
 
-1. `live` — a live agent exists for the id, or the session lease is held
-   (`flock` on `<dir>/session.lock` fails with `EWOULDBLOCK`).
+`Coldstore.classify` returns the first reason that applies, so this order is
+observable in `GET /plan` and in the `skipped` list a commit returns.
+
+0. `already-cold` — the id is already in the manifest. This is a skip, not an
+   exemption: it is checked before anything else because a cold id has no live
+   directory left to move.
+1. `live` — a live agent exists for the id (`ctx.agents` predicate). There is
+   no lock file and no lease; liveness is the whole guard.
 2. `pinned` — id in `workspaceRegistry.pinnedSessionIds`.
 3. `starred` — id in `stars.json` (set from the portal's plan list or a cold
    row; reachable *before* freezing, which is the point).
-4. `unread` — id never observed as the current session in `read.json`
-   (the plugin's own `{id: lastOpenedAt}` ledger).
+4. `unread` — the id has no entry in the plugin's own `read.json` ledger, **and**
+   the session was created after the ledger started observing
+   (`ledger.installedAt`). Sessions older than installation have no read history
+   to consult, so they fall through to `retainDays` / pin / star instead of
+   being exempt forever.
 5. `goal` — projection `goal` value has `phase` not in `complete|cancelled`.
 6. `todo` — projection `todos` contains a non-completed item.
 7. `subagent` — projection `origin === 'subagent'` or parentSessionId present.
-8. `too-new` — `lastPromptAt` (or `createdAt`) newer than `retainDays`.
-9. `already-cold` — already in coldstore (not an exemption, just skip).
+8. `too-new` — `lastPromptAt` (or `createdAt`) newer than
+   `max(retainDays, minIdleMs)`.
 
 ## Safety rules
 
-- Never move a directory whose lease cannot be acquired.
-- Never move a session that is absent from the manifest after a partial copy:
-  move into coldstore first, write the manifest, and only then remove the
-  source — and if the manifest write fails, move it straight back.
-- `restore` verifies sha256 before deleting anything from coldstore.
+- Never move a session while `dryRun` is on, on any path (sweep, commit,
+  direct freeze). A move is only ever reachable with `dryRun: false`.
+- Never move a live session, and never let naming a session bypass an exemption.
+- Never overwrite a populated destination: `movePath` replaces an *empty*
+  directory only and otherwise throws, so a stale copy cannot silently destroy a
+  transcript.
+- Never strand a session: move into coldstore first, write the manifest, and if
+  the manifest write fails, move it straight back.
+- `restore` verifies the recorded sha256 before handing a transcript back. The
+  CLI does the same and refuses on a mismatch unless `--force` is passed.
 - `delete` moves to `coldstore/trash/`, never unlinks.
